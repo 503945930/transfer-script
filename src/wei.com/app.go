@@ -121,8 +121,7 @@ func start(offset int, count int) {
 		//fmt.Println()
 		jsonStr := `{"id":"{{.Id}}","displayName":"{{.Display_name.String}}","password":"{{.Password.String}}","role":"{{.Role.String}}",
 		"email":"{{.Email.String}}","mobile":"{{.Mobile.String}}","locationLat":"{{.Lat.String}}","locationLon":"{{.Lng.String}}",
-		"wechat":{"openid":"{{.Wechat.Openid}}","nickName":"{{.Display_name.String}}","headimgurl":"{{.Wechat.Avatar_url.String}}"}}
-`
+		"wechat":{"openid":"{{.Wechat.Openid}}","nickName":"{{.Display_name.String}}","headimgurl":"{{.Wechat.Avatar_url.String}}"}}`
 		var data bytes.Buffer
 		tmpl, err := template.New("tem").Parse(jsonStr) //建立一个模板
 

@@ -8,11 +8,12 @@ import (
 	"bytes"
 	"io/ioutil"
 	"regexp"
-	"text/template"
 	"encoding/json"
 	"fmt"
 	"time"
 	"math"
+	"strconv"
+	"text/template"
 )
 
 // Wechat model
@@ -20,20 +21,24 @@ type Wechat struct {
 	Openid     string
 	Headimgurl string
 	Nickname   string
+	Sex        string
+	Language   string
+	City       string
+	Province   string
+	Country    string
 }
-
 type Operator struct {
 	Id          string
 	DisplayName string
 	Role        string
-	Email       string
 	Mobile struct {
 		Profile struct {
 			Mobile string
 		}
 	}
-	Lat float64
-	Lng float64
+	Ktvid string
+	Lat   float64
+	Lng   float64
 	Wechat struct {
 		Profile Wechat
 	}
@@ -48,8 +53,9 @@ type HttpResult struct {
 	}
 }
 
-var authHttpUrlBefore string = "http://staging-yedian.chinacloudapp.cn:3003/internal/query/users"
-var authHttpUrlAfter string = "http://localhost:4001/internal/migrate/users?_type=Operator"
+var authHttpUrlBefore string = "http://prod-api.chinacloudapp.cn:3000/ktvCore/ktvs/846/users/graphql"
+//var authHttpUrlAfter string = "http://user.prod-v1.ye-dian.com/auth/users?_type=VenuesManager"
+var authHttpUrlAfter string = "http://127.0.0.1:4000/auth/users?_type=VenuesManager"
 var maxRoutineNum int = 100
 var count int = 20 //每页数量
 var offset int = 0
@@ -90,24 +96,44 @@ func main() {
 }
 
 func start(offset int, count int) {
+	soffset := strconv.Itoa(offset)
+	scount := strconv.Itoa(count)
 	//jsonStr := `"query":"query{users(from: 5, size: 3){total,list{id}}"`
-	jsonStr := `{"query":"query {\n users(from: 0, size: 10) {\n total\n  list {\n  id\n displayName\n  role\n  lat\n lng\n  email\n mobile {\n   profile{\n   mobile\n  }\n  }\n wechat {\n  profile {\n openid\n  nickname\n sex\n city\n province\n country\n headimgurl\n }\n }\n  }\n }\n}"}`
+	jsonStr := `{"query":"query {\n users(from:` + soffset + `, size: ` + scount + `) {\n total\n  list {\n  id\n displayName\n  role\n ktvid\n  lat\n lng\n  \n mobile {\n   profile{\n   mobile\n  }\n  }\n wechat {\n  profile {\n openid\n  nickname\n  headimgurl\n  }\n }\n  }\n }\n}"}`
 
+	fmt.Println("offset", jsonStr)
 	result, err := httpPost(authHttpUrlBefore, jsonStr)
 	var httpResult HttpResult
 	err = json.Unmarshal(result, &httpResult)
 	utils.CheckErr(err)
+	//fmt.Println("httpResult", httpResult)
+	/* 创建集合 */
+	role := make(map[string]string)
+
+	/* map 插入 key-value 对，各个国家对应的首都 */
+	role["ktv_manager"] = "VenuesManager"
+	role["ktv_admin_manager"] = "VenuesAdmin"
 
 	for _, v := range httpResult.Data.Users.List {
 		//fmt.Println(v.Id)
 		//fmt.Println(v.DisplayName)
 		//fmt.Println(v.Role)
 		//fmt.Println(v.Mobile.Profile.Mobile)
-
+		v.Role = role[v.Role]
+		var jsonStr string = ""
+		if v.DisplayName == "" {
+			v.DisplayName = strconv.FormatInt(time.Now().Unix(), 10)
+		}
 		//fmt.Println()
-		jsonStr := `{"id":"{{.Id}}","displayName":"{{.DisplayName}}","role":"{{.Role}}",
-		"email":"{{.Email}}","mobile":"{{.Mobile.Profile.Mobile}}","locationLat":"{{.Lat}}","locationLon":"{{.Lng}}",
-		"wechat":{"openid":"{{.Wechat.Profile.Openid}}","nickName":"{{.Wechat.Profile.Nickname}}","headimgurl":"{{.Wechat.Profile.Headimgurl}}"}}`
+		if v.Wechat.Profile.Openid != "" {
+			jsonStr = `{"displayName":"{{.DisplayName}}","role":"{{.Role}}","subscribe":1,"venuesId":"{{.Ktvid}}",
+				"mobile":"{{.Mobile.Profile.Mobile}}","locationLat":"{{.Lat}}","locationLon":"{{.Lng}}",
+				"wechat":{"openid":"{{.Wechat.Profile.Openid}}","nickName":"{{.DisplayName}}","sex":"0","headimgurl":"not found"}}`
+		} else {
+			jsonStr = `{"displayName":"{{.DisplayName}}","role":"{{.Role}}","subscribe":1,"venuesId":"{{.Ktvid}}",
+				"mobile":"{{.Mobile.Profile.Mobile}}","locationLat":"{{.Lat}}","locationLon":"{{.Lng}}"}`
+		}
+
 		var data bytes.Buffer
 		tmpl, err := template.New("tem").Parse(jsonStr) //建立一个模板
 
@@ -115,7 +141,7 @@ func start(offset int, count int) {
 		utils.CheckErr(err)
 
 		//var jsonStr = []byte(json.Marshal(value))
-		fmt.Println(data.String())
+		//fmt.Println("post:jsonStr", data.String())
 		// 添加到新的 operator
 		httpPost(authHttpUrlAfter, data.String())
 	}
@@ -131,7 +157,7 @@ func worker(id int, jobs <-chan int, results chan<- int) {
 }
 
 func httpPost(httpUrl string, data string) ([]byte, error) {
-
+	//fmt.Println("httpPost", httpUrl)
 	//var jsonStr = []byte(`{"title":"Buy cheese and bread for breakfast."}`)
 	req, err := http.NewRequest("POST", httpUrl, bytes.NewBuffer([]byte(data)))
 	//req.Header.Set("X-Custom-Header", "myvalue")
@@ -145,10 +171,10 @@ func httpPost(httpUrl string, data string) ([]byte, error) {
 
 	body, err := ioutil.ReadAll(resp.Body)
 	utils.CheckErr(err)
-	//fmt.Println(string(body))
+	fmt.Println(httpUrl+"return body", string(body))
 	r, _ := regexp.Compile("error_code")
 	if r.MatchString(string(body)) {
-		logFile(data)
+		logFile(string(body))
 	}
 
 	return body, nil
@@ -189,5 +215,6 @@ func getCount() {
 	var httpResult HttpResult
 	err = json.Unmarshal(result, &httpResult)
 	utils.CheckErr(err)
-	total = int(math.Ceil(float64(httpResult.Data.Users) / float64(count))) //page总数
+	//fmt.Println("getCount", httpResult)
+	total = int(math.Ceil(float64(httpResult.Data.Users.Total) / float64(count))) //page总数
 }
